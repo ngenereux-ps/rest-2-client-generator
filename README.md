@@ -16,6 +16,8 @@ Codegen, and then run the generation to produce a client SDK for use in other to
 * Java JRE 1.8+
 
 ### Steps:
+
+#### Local Build
 * Clone the git repo at https://github.com/PureStorage-OpenConnect/swagger, or download it in some other way
 * Install the python requirements with `python3 -m pip install -r requirements.txt`
 * Run `python3 build.py <source> <target> [options]` with the following parameters
@@ -27,6 +29,10 @@ Codegen, and then run the generation to produce a client SDK for use in other to
     * `--java-binary JAVA_BINARY`: Location of the Java binary. Defaults to `/usr/bin/java`. If on Windows, specify the 
 location of the `java.exe` file to use when running Swagger Codegen
     * `--swagger-gen SWAGGER_GEN`: URL of swagger-codegen-cli jar file. Defaults to the latest tested build.
+
+#### Docker Build
+* Run `./build_docker.sh`
+* Use any of the options specified above
 
 ### Sample Execution
 ```
@@ -54,6 +60,7 @@ to document the REST APIs rely heavily on referencing other yaml files. For exam
 to by its reference, the properties of that reference are implemented in `models/FA2.0/_reference.yaml`. Unfortunately,
 this level of referencing causes issues with the code generation package. To avoid these issues, all references in
 the `models` and `responses` packages which appear inside an `allOf` element are resolved and inlined.
+* Fix old-style 'required: true' properties with the correct `require: ['a', 'b', 'c']` form
 
 ### Java
 * Once generated, some Java class files reference the `Array` class created for the arrays APIs. These references
@@ -62,7 +69,7 @@ issue.
 * The generator adds the deprecated `@javax.annotation.Generated` annotation. These are removed.
 
 ## Limitations
-* While generation *should* work for any supported language, this package has only be thoroughly tested generating Java.
+* While generation *should* work for any supported language, this package has only been thoroughly tested generating Java.
 * Only FlashArray APIs are supported currently
 
 ## Next Steps

@@ -78,7 +78,7 @@ def fix_camel_case_issues(directory):
             fix_camel_case_issues(filename)
 
 
-def fix_array_imports(directory):
+def fix_java_compilation_issions(directory):
     for entry in os.listdir(directory):
         filename = os.path.join(directory, entry)
         if os.path.isfile(filename):
@@ -89,7 +89,7 @@ def fix_array_imports(directory):
                 replace_text(filename, r"@javax.annotation.Generated.+", "")
 
         elif os.path.isdir(filename):
-            fix_array_imports(filename)
+            fix_java_compilation_issions(filename)
 
 
 def build(source: str, target:str, language: str, versions: List[str], swagger_jar_url: str, java_binary: str):
@@ -153,8 +153,8 @@ def build(source: str, target:str, language: str, versions: List[str], swagger_j
             raise
 
         if language == 'java':
-            print("Fixing array import issue")
-            fix_array_imports(client_dir)
+            print("Fixing Java compilation issues")
+            fix_java_compilation_issions(client_dir)
 
         os.makedirs(target_path)
         shutil.copytree(client_dir, target_path, dirs_exist_ok=True)
