@@ -20,6 +20,9 @@ import urllib.request
 from scripts import yaml_utils
 
 
+COMMON_ARTIFACT_ID = 'purestorage-rest-client-common'
+
+
 def determine_versions(source_dir, versions):
     # Determine Versions
     if (versions is None or len(versions) == 0):
@@ -38,15 +41,30 @@ def get_config_file(config_dir, version):
     return os.path.join(config_dir, f"FA{version}.json")
 
 
-def generate_configs(config_dir, language, versions):
+def get_artifact_id(version):
+    return f"flasharray-rest-{version}-client"
+
+
+def get_model_package(version):
+    return f"com.purestorage.rest.flasharray.v{version.replace('.', '_')}.model"
+
+
+def get_api_package(version):
+    return f"com.purestorage.rest.flasharray.v{version.replace('.', '_')}.api"
+
+
+def generate_configs(config_dir, language, versions, artifact_version):
     # Write configs
     os.mkdir(config_dir)
     for version in versions:
         if language == 'java':
             config_dict = {
-                'modelPackage': f"com.purestorage.flasharray.rest{version.replace('.', '')}.model",
-                'apiPackage': f"com.purestorage.flasharray.rest{version.replace('.', '')}.api",
-                'artifactId': f"flasharray-rest-{version}-java-client"
+                'groupId': "com.purestorage",
+                'invokerPackage': "com.purestorage.rest.common",
+                'modelPackage': get_model_package(version),
+                'apiPackage': get_api_package(version),
+                'artifactId': get_artifact_id(version),
+                'artifactVersion': artifact_version
             }
             with open(get_config_file(config_dir, version), 'w') as config_file:
                 json.dump(config_dict, config_file)
@@ -92,7 +110,22 @@ def fix_java_compilation_issions(directory):
             fix_java_compilation_issions(filename)
 
 
-def build(source: str, target:str, language: str, versions: List[str], swagger_jar_url: str, java_binary: str):
+def add_common_dependency_to_pom(pom_file, artifact_version):
+    with open(pom_file, 'r+') as fd:
+        contents = fd.readlines()
+        for index, line in enumerate(contents):
+            if '<dependencies>' in line:
+                contents.insert(index + 1, '        <dependency>\n')
+                contents.insert(index + 2, '            <groupId>com.purestorage</groupId>\n')
+                contents.insert(index + 3, f'            <artifactId>{COMMON_ARTIFACT_ID}</artifactId>\n')
+                contents.insert(index + 4, f'            <version>{artifact_version}</version>\n')
+                contents.insert(index + 5, '        </dependency>\n')
+                break
+        fd.seek(0)
+        fd.writelines(contents)
+
+
+def build(source: str, target:str, language: str, versions: List[str], swagger_jar_url: str, java_binary: str, artifact_version: str):
     # Copy source files to temporary location
     temp_dir = tempfile.mkdtemp()
     print("Working in directory: " + temp_dir)
@@ -110,7 +143,7 @@ def build(source: str, target:str, language: str, versions: List[str], swagger_j
     versions = determine_versions(source_dir, versions)
     versions.sort()
     print("Generating config for versions: " + str(versions))
-    generate_configs(config_dir, language, versions)
+    generate_configs(config_dir, language, versions, artifact_version)
     print("Fixing camel case issues")
     fix_camel_case_issues(source_dir)
 
@@ -118,6 +151,8 @@ def build(source: str, target:str, language: str, versions: List[str], swagger_j
     print("Fixing references in models and responses")
     yaml_utils.process_paths(glob.glob(os.path.join(source_dir, 'models', 'FA*')))
     yaml_utils.process_paths(glob.glob(os.path.join(source_dir, 'responses', 'FA*')))
+
+    first_version = True
 
     for version in versions:
         target_path = os.path.join(target, f"{version}")
@@ -156,10 +191,28 @@ def build(source: str, target:str, language: str, versions: List[str], swagger_j
             print("Fixing Java compilation issues")
             fix_java_compilation_issions(client_dir)
 
+            if first_version:
+                print("Extracting common classes")
+                # Copy out the common java files to a separate java project
+                common_path = os.path.join(temp_dir, "common")
+                shutil.copytree(client_dir, common_path, dirs_exist_ok=True)
+                shutil.rmtree(os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", "flasharray"))
+                shutil.rmtree(os.path.join(common_path, "src", "test"))
+                replace_text(os.path.join(common_path, 'pom.xml'), get_artifact_id(version), COMMON_ARTIFACT_ID)
+                replace_text(os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", "common", "JSON.java"),
+                             f"import {get_model_package(version)}.*;", "")
+                common_target_path = os.path.join(target, "common")
+                os.makedirs(common_target_path)
+                shutil.copytree(common_path, common_target_path, dirs_exist_ok=True)
+
+            shutil.rmtree(os.path.join(client_dir, "src", "main", "java", "com", "purestorage", "rest", "common"))
+            add_common_dependency_to_pom(os.path.join(client_dir, 'pom.xml'), artifact_version)
+
         os.makedirs(target_path)
         shutil.copytree(client_dir, target_path, dirs_exist_ok=True)
 
         print("Generated SDK available at: " + target_path)
+        first_version = False
 
     print("Cleaning up")
     shutil.rmtree(temp_dir)
@@ -173,6 +226,7 @@ def main():
     parser.add_argument('--language', '-l', help='Language to build. Defaults to "java".', default='java', required=False)
     parser.add_argument('--java-binary', '-j', help='Location of the Java binary. Defaults to "/usr/bin/java".', default='/usr/bin/java', required=False)
     parser.add_argument('--swagger-gen', '-s', help='URL of swagger-codegen-cli jar file.', default='https://repo1.maven.org/maven2/io/swagger/swagger-codegen-cli/2.4.28/swagger-codegen-cli-2.4.28.jar', required=False)
+    parser.add_argument('--artifact-version', help='Version of generated artifact', default='1.0.0', required=False)
 
     args = parser.parse_args()
 
@@ -180,8 +234,7 @@ def main():
         print("ERROR: --java-binary must be a path to a java executable")
         exit(1)
 
-
-    build(args.source, args.target, args.language, args.versions, args.swagger_gen, args.java_binary)
+    build(args.source, args.target, args.language, args.versions, args.swagger_gen, args.java_binary, args.artifact_version)
 
 
 if __name__ == '__main__':
