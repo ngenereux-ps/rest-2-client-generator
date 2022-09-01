@@ -205,6 +205,8 @@ def build(source: str, target:str, language: str, versions: List[str], swagger_j
                 os.makedirs(common_target_path)
                 shutil.copytree(common_path, common_target_path, dirs_exist_ok=True)
 
+                print("Common classes available at: " + common_target_path)
+
             shutil.rmtree(os.path.join(client_dir, "src", "main", "java", "com", "purestorage", "rest", "common"))
             add_common_dependency_to_pom(os.path.join(client_dir, 'pom.xml'), artifact_version)
 

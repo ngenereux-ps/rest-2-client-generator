@@ -9,8 +9,9 @@ COPY ./requirements.txt .
 RUN python3 -m pip install -r requirements.txt
 
 COPY ./build.py .
+COPY ./docker_entrypoint.sh .
 COPY ./scripts ./scripts
 
-RUN git clone https://github.com/PureStorage-OpenConnect/swagger.git
+RUN ["chmod", "+x", "/source/docker_entrypoint.sh"]
 
-ENTRYPOINT ["python3", "build.py", "./swagger/html", "/build"]
+ENTRYPOINT ["/source/docker_entrypoint.sh"]
