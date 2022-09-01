@@ -18,9 +18,8 @@ import tempfile, shutil, os, re, glob
 import urllib.request
 
 from scripts import yaml_utils
-
-
-COMMON_ARTIFACT_ID = 'purestorage-rest-client-common'
+from scripts.file_utils import replace_text
+from scripts.language_handler import get_language_handler, get_config_file
 
 
 def determine_versions(source_dir, versions):
@@ -35,47 +34,6 @@ def determine_versions(source_dir, versions):
                     versions.append(filename[2:])
 
     return versions
-
-
-def get_config_file(config_dir, version):
-    return os.path.join(config_dir, f"FA{version}.json")
-
-
-def get_artifact_id(version):
-    return f"flasharray-rest-{version}-client"
-
-
-def get_model_package(version):
-    return f"com.purestorage.rest.flasharray.v{version.replace('.', '_')}.model"
-
-
-def get_api_package(version):
-    return f"com.purestorage.rest.flasharray.v{version.replace('.', '_')}.api"
-
-
-def generate_configs(config_dir, language, versions, artifact_version):
-    # Write configs
-    os.mkdir(config_dir)
-    for version in versions:
-        if language == 'java':
-            config_dict = {
-                'groupId': "com.purestorage",
-                'invokerPackage': "com.purestorage.rest.common",
-                'modelPackage': get_model_package(version),
-                'apiPackage': get_api_package(version),
-                'artifactId': get_artifact_id(version),
-                'artifactVersion': artifact_version
-            }
-            with open(get_config_file(config_dir, version), 'w') as config_file:
-                json.dump(config_dict, config_file)
-
-
-def replace_text(filename, to_replace, replacement):
-    with open(filename, "r") as file:
-        lines = file.readlines()
-    with open(filename, "w") as file:
-        for line in lines:
-            file.write(re.sub(to_replace, replacement, line))
 
 
 def fix_camel_case_issues(directory):
@@ -96,46 +54,20 @@ def fix_camel_case_issues(directory):
             fix_camel_case_issues(filename)
 
 
-def fix_java_compilation_issions(directory):
-    for entry in os.listdir(directory):
-        filename = os.path.join(directory, entry)
-        if os.path.isfile(filename):
-            file, extension = os.path.splitext(entry)
-            if file.startswith('Array') and extension == '.java':
-                replace_text(filename, r"import java.util.Arrays\;", "")
-            if extension == '.java':
-                replace_text(filename, r"@javax.annotation.Generated.+", "")
+def build(source: str, build_output_root_dir: str, language: str, versions: List[str], swagger_jar_url: str, java_binary: str,
+          artifact_version: str):
+    launguage_handler = get_language_handler(language)
 
-        elif os.path.isdir(filename):
-            fix_java_compilation_issions(filename)
-
-
-def add_common_dependency_to_pom(pom_file, artifact_version):
-    with open(pom_file, 'r+') as fd:
-        contents = fd.readlines()
-        for index, line in enumerate(contents):
-            if '<dependencies>' in line:
-                contents.insert(index + 1, '        <dependency>\n')
-                contents.insert(index + 2, '            <groupId>com.purestorage</groupId>\n')
-                contents.insert(index + 3, f'            <artifactId>{COMMON_ARTIFACT_ID}</artifactId>\n')
-                contents.insert(index + 4, f'            <version>{artifact_version}</version>\n')
-                contents.insert(index + 5, '        </dependency>\n')
-                break
-        fd.seek(0)
-        fd.writelines(contents)
-
-
-def build(source: str, target:str, language: str, versions: List[str], swagger_jar_url: str, java_binary: str, artifact_version: str):
     # Copy source files to temporary location
-    temp_dir = tempfile.mkdtemp()
-    print("Working in directory: " + temp_dir)
+    working_dir = tempfile.mkdtemp()
+    print("Working in directory: " + working_dir)
 
     print("Downloading " + swagger_jar_url)
-    swagger_jar = os.path.join(temp_dir, 'swagger-codegen-cli.jar')
+    swagger_jar = os.path.join(working_dir, 'swagger-codegen-cli.jar')
     urllib.request.urlretrieve(swagger_jar_url, swagger_jar)
 
-    source_dir = os.path.join(temp_dir, 'source')
-    config_dir = os.path.join(temp_dir, 'config')
+    source_dir = os.path.join(working_dir, 'source')
+    config_dir = os.path.join(working_dir, 'config')
 
     print("Making a copy of the swagger files")
     shutil.copytree(source, source_dir, dirs_exist_ok=True)
@@ -143,7 +75,9 @@ def build(source: str, target:str, language: str, versions: List[str], swagger_j
     versions = determine_versions(source_dir, versions)
     versions.sort()
     print("Generating config for versions: " + str(versions))
-    generate_configs(config_dir, language, versions, artifact_version)
+
+    os.mkdir(config_dir)
+    launguage_handler.generate_configs(config_dir, language, versions, artifact_version)
     print("Fixing camel case issues")
     fix_camel_case_issues(source_dir)
 
@@ -155,14 +89,14 @@ def build(source: str, target:str, language: str, versions: List[str], swagger_j
     first_version = True
 
     for version in versions:
-        target_path = os.path.join(target, f"{version}")
-        if os.path.isdir(target_path) and len(os.listdir(target_path)) != 0:
-            print("WARNING: Target directory not empty: " + target_path)
+        build_output_dir = os.path.join(build_output_root_dir, f"{version}")
+        if os.path.isdir(build_output_dir) and len(os.listdir(build_output_dir)) != 0:
+            print("WARNING: Target directory not empty: " + build_output_dir)
             print("WARNING: Skipping version: " + version)
             continue
 
-        client_dir = os.path.join(temp_dir, f"client_{version}")
-        os.mkdir(client_dir)
+        generator_output_dir = os.path.join(working_dir, f"client_{version}")
+        os.mkdir(generator_output_dir)
 
         print("Generating client for version " + version)
         result = subprocess.run([java_binary,
@@ -172,7 +106,7 @@ def build(source: str, target:str, language: str, versions: List[str], swagger_j
                                  '-i',
                                  os.path.join(source_dir, 'specs', f"FA{version}.spec.yaml"),
                                  '-o',
-                                 client_dir,
+                                 generator_output_dir,
                                  '-l',
                                  language,
                                  '-c',
@@ -187,47 +121,32 @@ def build(source: str, target:str, language: str, versions: List[str], swagger_j
             print(result.stderr)
             raise
 
-        if language == 'java':
-            print("Fixing Java compilation issues")
-            fix_java_compilation_issions(client_dir)
+        launguage_handler.post_process(version, generator_output_dir, working_dir, build_output_root_dir, artifact_version,
+                                       first_version)
 
-            if first_version:
-                print("Extracting common classes")
-                # Copy out the common java files to a separate java project
-                common_path = os.path.join(temp_dir, "common")
-                shutil.copytree(client_dir, common_path, dirs_exist_ok=True)
-                shutil.rmtree(os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", "flasharray"))
-                shutil.rmtree(os.path.join(common_path, "src", "test"))
-                replace_text(os.path.join(common_path, 'pom.xml'), get_artifact_id(version), COMMON_ARTIFACT_ID)
-                replace_text(os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", "common", "JSON.java"),
-                             f"import {get_model_package(version)}.*;", "")
-                common_target_path = os.path.join(target, "common")
-                os.makedirs(common_target_path)
-                shutil.copytree(common_path, common_target_path, dirs_exist_ok=True)
+        os.makedirs(build_output_dir)
+        shutil.copytree(generator_output_dir, build_output_dir, dirs_exist_ok=True)
 
-                print("Common classes available at: " + common_target_path)
-
-            shutil.rmtree(os.path.join(client_dir, "src", "main", "java", "com", "purestorage", "rest", "common"))
-            add_common_dependency_to_pom(os.path.join(client_dir, 'pom.xml'), artifact_version)
-
-        os.makedirs(target_path)
-        shutil.copytree(client_dir, target_path, dirs_exist_ok=True)
-
-        print("Generated SDK available at: " + target_path)
+        print("Generated SDK available at: " + build_output_dir)
         first_version = False
 
     print("Cleaning up")
-    shutil.rmtree(temp_dir)
+    shutil.rmtree(working_dir)
 
 
 def main():
     parser = argparse.ArgumentParser(description='Build FlashArray REST 2 SDK from swagger files')
     parser.add_argument('source', help='Location of Swagger spec files')
     parser.add_argument('target', help='Directory to put generated clients')
-    parser.add_argument('--versions', '-v', nargs='+', help='List of versions to build. Omit to build all versions.', default=None, required=False)
-    parser.add_argument('--language', '-l', help='Language to build. Defaults to "java".', default='java', required=False)
-    parser.add_argument('--java-binary', '-j', help='Location of the Java binary. Defaults to "/usr/bin/java".', default='/usr/bin/java', required=False)
-    parser.add_argument('--swagger-gen', '-s', help='URL of swagger-codegen-cli jar file.', default='https://repo1.maven.org/maven2/io/swagger/swagger-codegen-cli/2.4.28/swagger-codegen-cli-2.4.28.jar', required=False)
+    parser.add_argument('--versions', '-v', nargs='+', help='List of versions to build. Omit to build all versions.',
+                        default=None, required=False)
+    parser.add_argument('--language', '-l', help='Language to build. Defaults to "java".', default='java',
+                        required=False)
+    parser.add_argument('--java-binary', '-j', help='Location of the Java binary. Defaults to "/usr/bin/java".',
+                        default='/usr/bin/java', required=False)
+    parser.add_argument('--swagger-gen', '-s', help='URL of swagger-codegen-cli jar file.',
+                        default='https://repo1.maven.org/maven2/io/swagger/swagger-codegen-cli/2.4.28/swagger-codegen-cli-2.4.28.jar',
+                        required=False)
     parser.add_argument('--artifact-version', help='Version of generated artifact', default='1.0.0', required=False)
 
     args = parser.parse_args()
@@ -236,7 +155,8 @@ def main():
         print("ERROR: --java-binary must be a path to a java executable")
         exit(1)
 
-    build(args.source, args.target, args.language, args.versions, args.swagger_gen, args.java_binary, args.artifact_version)
+    build(args.source, args.target, args.language, args.versions, args.swagger_gen, args.java_binary,
+          args.artifact_version)
 
 
 if __name__ == '__main__':
