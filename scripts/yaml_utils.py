@@ -27,14 +27,21 @@ def _process_refs(file):
 
 def _resolve_refs(file, items):
     new_dict = {}
+    if len(items) == 1 and isinstance(items[0], dict) and len(items[0]) == 1 and '$ref' in items[0]:
+        # This allof contains a single ref. No need to inline, just remove the allof
+        return {'$ref': items[0]['$ref']}
     for item in items:
         if isinstance(item, dict):
             for k, v in item.items():
                 if k == '$ref':
-                    ref_file = os.path.join(os.path.dirname(os.path.abspath(file)), v)
+                    ref_file = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(file)), v))
                     ref_dict = _process_refs(ref_file)
+
                     for kr, vr in ref_dict.items():
-                        new_dict[kr] = vr
+                        if kr in new_dict and isinstance(vr, dict) and isinstance(new_dict[kr], dict):
+                            new_dict[kr] = {**new_dict[kr], **vr}
+                        else:
+                            new_dict[kr] = vr
                 else:
                     if k in new_dict and isinstance(v, dict) and isinstance(new_dict[k], dict):
                         new_dict[k] = {**new_dict[k], **v}
@@ -76,7 +83,8 @@ def _fix_required(file):
     with open(file) as f:
         yaml_obj = yaml.safe_load(f)
 
-        return _traverse_required(yaml_obj)
+        yaml_obj = _traverse_required(yaml_obj)
+        return yaml_obj
 
 
 def _traverse_required(obj):
@@ -107,6 +115,33 @@ def _traverse_required(obj):
         return obj
 
 
+def _normalize_relative_refs(file):
+    with open(file) as f:
+        yaml_obj = yaml.safe_load(f)
+
+        yaml_obj = _traverse_relative_refs(file, yaml_obj)
+        return yaml_obj
+
+
+def _traverse_relative_refs(file, obj):
+    if isinstance(obj, list):
+        new_list = []
+        for li in obj:
+            new_list.append(_traverse_relative_refs(file, li))
+        return new_list
+    elif isinstance(obj, dict):
+        # Check if this defines an object
+        for k, v in obj.items():
+            if k == '$ref' and not v.startswith('../'):
+                obj[k] = os.path.join("../../", os.path.relpath(os.path.join(os.path.dirname(file), v), os.path.join(os.path.dirname(file), "../../")))
+            else:
+                obj[k] = _traverse_relative_refs(file, v)
+
+        return obj
+    else:
+        return obj
+
+
 def process_paths(paths: List):
     """
     Find all files in the given path and inline the contents of any referenced files
@@ -125,7 +160,14 @@ def process_paths(paths: List):
         else:
             full_paths += glob.glob(path + '/*')
 
-    # Start by inlining all references in the given paths
+    # Normalized references to all be relative from same location
+    for file in files:
+        yaml_obj = _normalize_relative_refs(file)
+        yaml_out = yaml.dump(yaml_obj)
+        with open(file, "w") as f:
+            f.write(yaml_out)
+
+    # Inline appropriate references in the given paths
     for file in files:
         yaml_obj = _process_refs(file)
         yaml_out = yaml.dump(yaml_obj)
