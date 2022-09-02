@@ -99,18 +99,24 @@ def build(source: str, build_output_root_dir: str, language: str, versions: List
         os.mkdir(generator_output_dir)
 
         print("Generating client for version " + version)
-        result = subprocess.run([java_binary,
-                                 '-jar',
-                                 swagger_jar,
-                                 'generate',
-                                 '-i',
-                                 os.path.join(source_dir, 'specs', f"FA{version}.spec.yaml"),
-                                 '-o',
-                                 generator_output_dir,
-                                 '-l',
-                                 language,
-                                 '-c',
-                                 get_config_file(config_dir, version)],
+        process = [java_binary,
+                   '-DapiTests=false',
+                   '-DmodelTests=false',
+                   '-DapiDocs=false',
+                   '-DmodelDocs=false',
+                   '-jar',
+                   swagger_jar,
+                   'generate',
+                   '-i',
+                   os.path.join(source_dir, 'specs', f"FA{version}.spec.yaml"),
+                   '-o',
+                   generator_output_dir,
+                   '-l',
+                   language,
+                   '-c',
+                   get_config_file(config_dir, version)]
+        print("Running Swagger Codegen with following command: " + " ".join(process))
+        result = subprocess.run(process,
                                 capture_output=True,
                                 text=True)
 

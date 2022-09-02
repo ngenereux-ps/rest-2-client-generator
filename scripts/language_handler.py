@@ -50,19 +50,19 @@ class JavaHandler(LaunguageHandlerBase):
         self.common_artifact_id = 'purestorage-rest-client-common'
 
     @staticmethod
-    def get_artifact_id(version):
+    def _get_artifact_id(version):
         return f"flasharray-rest-{version}-client"
 
     @staticmethod
-    def get_model_package(version):
+    def _get_model_package(version):
         return f"com.purestorage.rest.flasharray.v{version.replace('.', '_')}.model"
 
     @staticmethod
-    def get_api_package(version):
+    def _get_api_package(version):
         return f"com.purestorage.rest.flasharray.v{version.replace('.', '_')}.api"
 
     @staticmethod
-    def fix_java_compilation_issues(directory):
+    def _fix_java_compilation_issues(directory):
         for entry in os.listdir(directory):
             filename = os.path.join(directory, entry)
             if os.path.isfile(filename):
@@ -73,9 +73,9 @@ class JavaHandler(LaunguageHandlerBase):
                     replace_text(filename, r"@javax.annotation.Generated.+", "")
 
             elif os.path.isdir(filename):
-                JavaHandler.fix_java_compilation_issues(filename)
+                JavaHandler._fix_java_compilation_issues(filename)
 
-    def add_common_dependency_to_pom(self, pom_file, artifact_version):
+    def _add_common_dependency_to_pom(self, pom_file, artifact_version):
         with open(pom_file, 'r+') as fd:
             contents = fd.readlines()
             for index, line in enumerate(contents):
@@ -89,6 +89,93 @@ class JavaHandler(LaunguageHandlerBase):
             fd.seek(0)
             fd.writelines(contents)
 
+    def _check_duplicate_class(self, original, duplicate):
+        original_class_name = os.path.basename(original)
+        duplicate_class_name = os.path.basename(duplicate)
+
+        original_var_name = original_class_name[0].lower() + original_class_name[1:]
+        duplicate_var_name = duplicate_class_name[0].lower() + duplicate_class_name[1:]
+
+        with open(original + '.java', 'r') as f:
+            original_contents = f.readlines()
+
+        with open(duplicate + '.java', 'r') as f:
+            duplicate_contents = f.readlines()
+
+        if len(original_contents) != len(duplicate_contents):
+            return False
+
+        for index, original_line in enumerate(original_contents):
+            duplicate_line = duplicate_contents[index]
+            duplicate_line = re.sub(f"([^a-zA-z0-9])({duplicate_class_name})([^a-zA-z0-9])", r"\1" + original_class_name + r"\3", duplicate_line)
+            duplicate_line = re.sub(f"([^a-zA-z0-9])({duplicate_var_name})([^a-zA-z0-9])", r"\1" + original_var_name + r"\3", duplicate_line)
+            if duplicate_line != original_line:
+                print(original_line)
+                print(duplicate_line)
+                return False
+
+        return True
+
+    def _remove_duplicate_class(self, files, original, duplicate):
+        original_class_name = os.path.basename(original)
+        duplicate_class_name = os.path.basename(duplicate)
+
+        original_var_name = original_class_name[0].lower() + original_class_name[1:]
+        duplicate_var_name = duplicate_class_name[0].lower() + duplicate_class_name[1:]
+
+        updated_file_count = 0
+        for fileName, filePath in files.items():
+            if os.path.isfile(filePath):
+                with open(filePath, 'r') as f:
+                    contents = f.readlines()
+                new_contents = []
+                changed = False
+                for index, line in enumerate(contents):
+                    line = re.sub(f"([^a-zA-z0-9])({duplicate_class_name})([^a-zA-z0-9])", r"\1" + original_class_name + r"\3", line)
+                    line = re.sub(f"([^a-zA-z0-9])({duplicate_var_name})([^a-zA-z0-9])", r"\1" + original_var_name + r"\3", line)
+                    if line != contents[index]:
+                        changed = True
+
+                    # These changes can lead to duplicated import statements. Handle that as well
+                    if not line.startswith('import') or index == 0 or line != contents[index - 1]:
+                        new_contents.append(line)
+                if changed:
+                    updated_file_count += 1
+                    with open(filePath, 'w') as f:
+                        f.writelines(new_contents)
+
+        return updated_file_count
+
+    def _remove_duplicate_models(self, source_root):
+        full_paths = glob.glob(source_root + '/**/*.java', recursive=True)
+        files = {}
+
+        for path in full_paths:
+            if os.path.isfile(path):
+                fileName, fileExt = os.path.splitext(path)
+                if fileExt == '.java':
+                    files[fileName] = path
+
+        total_duplicate_classes = 0
+        total_updated_files = 0
+        duplicates = set()
+        for k, v in files.items():
+            next = 2
+            found = True
+            while (found):
+                duplicate_name = k + str(next)
+                found = duplicate_name not in duplicates and duplicate_name in files
+                if found:
+                    if self._check_duplicate_class(k, duplicate_name):
+                        total_duplicate_classes += 1
+                        os.remove(files[duplicate_name])
+                        total_updated_files += self._remove_duplicate_class(files, k, duplicate_name)
+                        duplicates.add(duplicate_name)
+                    next += 1
+
+        print(f"  Found {total_duplicate_classes} duplicate classes")
+        print(f"  Updated {total_updated_files} files to remove references to duplicates")
+
     def generate_configs(self, config_dir, language, versions, artifact_version):
         """Generate the config files used for this language for each version"""
         # Write configs
@@ -96,9 +183,9 @@ class JavaHandler(LaunguageHandlerBase):
             config_dict = {
                 'groupId': "com.purestorage",
                 'invokerPackage': "com.purestorage.rest.common",
-                'modelPackage': self.get_model_package(version),
-                'apiPackage': self.get_api_package(version),
-                'artifactId': self.get_artifact_id(version),
+                'modelPackage': self._get_model_package(version),
+                'apiPackage': self._get_api_package(version),
+                'artifactId': self._get_artifact_id(version),
                 'artifactVersion': artifact_version
             }
             with open(get_config_file(config_dir, version), 'w') as config_file:
@@ -120,7 +207,10 @@ class JavaHandler(LaunguageHandlerBase):
         :return:
         """
         print("Fixing Java compilation issues")
-        self.fix_java_compilation_issues(working_dir)
+        self._fix_java_compilation_issues(working_dir)
+
+        # The readme has very wrong documentation. Remove it to prevent confusion
+        os.remove(os.path.join(generator_output_dir, "README.md"))
 
         if first_version:
             print("Extracting common classes")
@@ -128,11 +218,13 @@ class JavaHandler(LaunguageHandlerBase):
             common_path = os.path.join(working_dir, "common")
             shutil.copytree(generator_output_dir, common_path, dirs_exist_ok=True)
             shutil.rmtree(os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", "flasharray"))
-            shutil.rmtree(os.path.join(common_path, "src", "test"))
-            replace_text(os.path.join(common_path, 'pom.xml'), self.get_artifact_id(version), self.common_artifact_id)
+            tests_path = os.path.join(common_path, "src", "test")
+            if os.path.isdir(tests_path):
+                shutil.rmtree(tests_path)
+            replace_text(os.path.join(common_path, 'pom.xml'), self._get_artifact_id(version), self.common_artifact_id)
             replace_text(
                 os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", "common", "JSON.java"),
-                f"import {self.get_model_package(version)}.*;", "")
+                f"import {self._get_model_package(version)}.*;", "")
             common_target_path = os.path.join(build_output_root_dir, "common")
             os.makedirs(common_target_path)
             shutil.copytree(common_path, common_target_path, dirs_exist_ok=True)
@@ -140,7 +232,9 @@ class JavaHandler(LaunguageHandlerBase):
             print("Common classes available at: " + common_target_path)
 
         shutil.rmtree(os.path.join(generator_output_dir, "src", "main", "java", "com", "purestorage", "rest", "common"))
-        self.add_common_dependency_to_pom(os.path.join(generator_output_dir, 'pom.xml'), artifact_version)
+        self._add_common_dependency_to_pom(os.path.join(generator_output_dir, 'pom.xml'), artifact_version)
+        print("Removing duplicate models")
+        self._remove_duplicate_models((os.path.join(generator_output_dir, "src")))
 
 
 def get_language_handler(language: str) -> LaunguageHandlerBase:

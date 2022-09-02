@@ -14,6 +14,8 @@ Codegen, and then run the generation to produce a client SDK for use in other to
 ### Requirements:
 * Python 3 (tested using python 3.9.9)
 * Java JRE 1.8+
+OR
+* Docker
 
 ### Steps:
 
@@ -29,6 +31,7 @@ Codegen, and then run the generation to produce a client SDK for use in other to
     * `--java-binary JAVA_BINARY`: Location of the Java binary. Defaults to `/usr/bin/java`. If on Windows, specify the 
 location of the `java.exe` file to use when running Swagger Codegen
     * `--swagger-gen SWAGGER_GEN`: URL of swagger-codegen-cli jar file. Defaults to the latest tested build.
+    * `--artifact-version`: Version of generated artifact. Defaults to 1.0.0
 
 #### Docker Build
 * Run `./build_docker.sh`
@@ -61,12 +64,19 @@ to by its reference, the properties of that reference are implemented in `models
 this level of referencing causes issues with the code generation package. To avoid these issues, all references in
 the `models` and `responses` packages which appear inside an `allOf` element are resolved and inlined.
 * Fix old-style 'required: true' properties with the correct `require: ['a', 'b', 'c']` form
+* Normalize all references: Swagger Codegen appears to store all references in a hashmap with the reference path as
+a key. However, it uses the relative path, so `_space.yaml` and `../../models/FA2.0/_space.yaml` will be treaded as
+separate models. To reduce the problems caused by this, all references are re-written as relative to the spec root.
+Since all yaml files are exactly two paths from that root, references work correctly in all cases
 
 ### Java
 * Once generated, some Java class files reference the `Array` class created for the arrays APIs. These references
 conflict with the `java.util.Array` import added by the generator. These imports are removed to resolve the compiler
 issue.
 * The generator adds the deprecated `@javax.annotation.Generated` annotation. These are removed.
+* Even after normalizing references, some duplicate classes are generated. This seems to happen when a model is used
+as both an input and in a response. The output classes are searched for duplicates with identical contents other than
+class name. These are then consolidated. 
 
 ## Limitations
 * While generation *should* work for any supported language, this package has only been thoroughly tested generating Java.
