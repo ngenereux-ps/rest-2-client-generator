@@ -11,7 +11,6 @@
 # such person has been advised of the possibility of such damages.
 
 import argparse
-import json
 import subprocess
 from typing import List
 import tempfile, shutil, os, re, glob
@@ -22,16 +21,26 @@ from scripts.file_utils import replace_text
 from scripts.language_handler import get_language_handler, get_config_file
 
 
-def determine_versions(source_dir, versions):
+def get_product_prefix(product):
+    if product == "flasharray":
+        return 'FA'
+    if product == 'pure1':
+        return 'Pure1-'
+
+    raise Exception('Unknown product: ' + product)
+
+
+def determine_versions(source_dir, product, versions):
     # Determine Versions
     if (versions is None or len(versions) == 0):
+        prefix = get_product_prefix(product)
         versions = []
         for entry in os.listdir(os.path.join(source_dir, "specs")):
             filename, extension = os.path.splitext(entry)
             if extension == '.yaml' and filename.endswith('.spec'):
                 filename = filename[:-len('.spec')]
-                if filename.startswith('FA2.') and (filename[4:] == 'X' or filename[4:].isdigit()):
-                    versions.append(filename[2:])
+                if filename.startswith(prefix) and (filename[len(prefix)+2:] == 'X' or filename[len(prefix)+2:].isdigit()):
+                    versions.append(filename[len(prefix):])
 
     return versions
 
@@ -54,9 +63,12 @@ def fix_camel_case_issues(directory):
             fix_camel_case_issues(filename)
 
 
-def build(source: str, build_output_root_dir: str, language: str, versions: List[str], swagger_jar_url: str, java_binary: str,
-          artifact_version: str):
-    launguage_handler = get_language_handler(language)
+def build(source: str, build_output_root_dir: str, product: str, language: str, versions: List[str],
+          swagger_jar_url: str, java_binary: str, artifact_version: str):
+
+    prefix = get_product_prefix(product)
+    launguage_handler = get_language_handler(product, language)
+
 
     # Copy source files to temporary location
     working_dir = tempfile.mkdtemp()
@@ -72,7 +84,7 @@ def build(source: str, build_output_root_dir: str, language: str, versions: List
     print("Making a copy of the swagger files")
     shutil.copytree(source, source_dir, dirs_exist_ok=True)
 
-    versions = determine_versions(source_dir, versions)
+    versions = determine_versions(source_dir, product, versions)
     versions.sort()
     print("Generating config for versions: " + str(versions))
 
@@ -83,8 +95,13 @@ def build(source: str, build_output_root_dir: str, language: str, versions: List
 
     # Process the yaml files for models and responses to make them work correctly with code generation
     print("Fixing references in models and responses")
-    yaml_utils.process_paths(glob.glob(os.path.join(source_dir, 'models', 'FA*')))
-    yaml_utils.process_paths(glob.glob(os.path.join(source_dir, 'responses', 'FA*')))
+    yaml_utils.process_paths(glob.glob(os.path.join(source_dir, 'models', prefix + '*')))
+    yaml_utils.process_paths(glob.glob(os.path.join(source_dir, 'responses', prefix + '*')))
+
+    print("Renaming files named 'array.yaml'")
+    yaml_utils.rename_array_yaml(glob.glob(os.path.join(source_dir, 'models', prefix + '*')))
+    yaml_utils.rename_array_yaml(glob.glob(os.path.join(source_dir, 'responses', prefix + '*')))
+    yaml_utils.rename_array_yaml(glob.glob(os.path.join(source_dir, 'specs', prefix + '*')))
 
     first_version = True
 
@@ -108,7 +125,7 @@ def build(source: str, build_output_root_dir: str, language: str, versions: List
                    swagger_jar,
                    'generate',
                    '-i',
-                   os.path.join(source_dir, 'specs', f"FA{version}.spec.yaml"),
+                   os.path.join(source_dir, 'specs', f"{prefix}{version}.spec.yaml"),
                    '-o',
                    generator_output_dir,
                    '-l',
@@ -144,6 +161,8 @@ def main():
     parser = argparse.ArgumentParser(description='Build FlashArray REST 2 SDK from swagger files')
     parser.add_argument('source', help='Location of Swagger spec files')
     parser.add_argument('target', help='Directory to put generated clients')
+    parser.add_argument('--product', '-p', choices=['flasharray', 'pure1'],help='Product to build.',
+                        default='flasharray', required=False)
     parser.add_argument('--versions', '-v', nargs='+', help='List of versions to build. Omit to build all versions.',
                         default=None, required=False)
     parser.add_argument('--language', '-l', help='Language to build. Defaults to "java".', default='java',
@@ -161,7 +180,7 @@ def main():
         print("ERROR: --java-binary must be a path to a java executable")
         exit(1)
 
-    build(args.source, args.target, args.language, args.versions, args.swagger_gen, args.java_binary,
+    build(args.source, args.target, args.product, args.language, args.versions, args.swagger_gen, args.java_binary,
           args.artifact_version)
 
 

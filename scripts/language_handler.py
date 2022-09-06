@@ -16,11 +16,12 @@ import json
 
 
 def get_config_file(config_dir, version):
-    return os.path.join(config_dir, f"FA{version}.json")
+    return os.path.join(config_dir, f"config{version}.json")
 
 
 class LaunguageHandlerBase:
-    def __init__(self):
+    def __init__(self, product):
+        self.product = product
         pass
 
     def generate_configs(self, config_dir, language, versions, artifact_version):
@@ -45,21 +46,21 @@ class LaunguageHandlerBase:
 
 
 class JavaHandler(LaunguageHandlerBase):
-    def __init__(self):
-        super().__init__()
-        self.common_artifact_id = 'purestorage-rest-client-common'
+    def __init__(self, product):
+        super().__init__(product)
+        self.common_artifact_id = f'{self.product}-rest-client-common'
 
-    @staticmethod
-    def _get_artifact_id(version):
-        return f"flasharray-rest-{version}-client"
+    def _get_version_for_package(self, version):
+        return f"v{version.replace('.', '_')}"
 
-    @staticmethod
-    def _get_model_package(version):
-        return f"com.purestorage.rest.flasharray.v{version.replace('.', '_')}.model"
+    def _get_artifact_id(self, version):
+        return f"{self.product}-rest-{version}-client"
 
-    @staticmethod
-    def _get_api_package(version):
-        return f"com.purestorage.rest.flasharray.v{version.replace('.', '_')}.api"
+    def _get_model_package(self, version):
+        return f"com.purestorage.rest.{self.product}.{self._get_version_for_package(version)}.model"
+
+    def _get_api_package(self, version):
+        return f"com.purestorage.rest.{self.product}.{self._get_version_for_package(version)}.api"
 
     @staticmethod
     def _fix_java_compilation_issues(directory):
@@ -131,7 +132,7 @@ class JavaHandler(LaunguageHandlerBase):
                 new_contents = []
                 changed = False
                 for index, line in enumerate(contents):
-                    line = re.sub(f"([^a-zA-z0-9])({duplicate_class_name})([^a-zA-z0-9])", r"\1" + original_class_name + r"\3", line)
+                    line = re.sub(f"([^a-zA-z0-9])(?<!java\.util\.)({duplicate_class_name})([^a-zA-z0-9])", r"\1" + original_class_name + r"\3", line)
                     line = re.sub(f"([^a-zA-z0-9])({duplicate_var_name})([^a-zA-z0-9])", r"\1" + original_var_name + r"\3", line)
                     if line != contents[index]:
                         changed = True
@@ -173,6 +174,17 @@ class JavaHandler(LaunguageHandlerBase):
                         duplicates.add(duplicate_name)
                     next += 1
 
+        for k, v in files.items():
+            duplicate_name = k + 's'
+            found = duplicate_name not in duplicates and duplicate_name in files
+            if found:
+                if self._check_duplicate_class(k, duplicate_name):
+                    total_duplicate_classes += 1
+                    os.remove(files[duplicate_name])
+                    total_updated_files += self._remove_duplicate_class(files, k, duplicate_name)
+                    duplicates.add(duplicate_name)
+
+
         print(f"  Found {total_duplicate_classes} duplicate classes")
         print(f"  Updated {total_updated_files} files to remove references to duplicates")
 
@@ -182,7 +194,7 @@ class JavaHandler(LaunguageHandlerBase):
         for version in versions:
             config_dict = {
                 'groupId': "com.purestorage",
-                'invokerPackage': "com.purestorage.rest.common",
+                'invokerPackage': f"com.purestorage.rest.{self.product}.common",
                 'modelPackage': self._get_model_package(version),
                 'apiPackage': self._get_api_package(version),
                 'artifactId': self._get_artifact_id(version),
@@ -212,33 +224,34 @@ class JavaHandler(LaunguageHandlerBase):
         # The readme has very wrong documentation. Remove it to prevent confusion
         os.remove(os.path.join(generator_output_dir, "README.md"))
 
-        if first_version:
-            print("Extracting common classes")
-            # Copy out the common java files to a separate java project
-            common_path = os.path.join(working_dir, "common")
-            shutil.copytree(generator_output_dir, common_path, dirs_exist_ok=True)
-            shutil.rmtree(os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", "flasharray"))
-            tests_path = os.path.join(common_path, "src", "test")
-            if os.path.isdir(tests_path):
-                shutil.rmtree(tests_path)
-            replace_text(os.path.join(common_path, 'pom.xml'), self._get_artifact_id(version), self.common_artifact_id)
-            replace_text(
-                os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", "common", "JSON.java"),
-                f"import {self._get_model_package(version)}.*;", "")
-            common_target_path = os.path.join(build_output_root_dir, "common")
-            os.makedirs(common_target_path)
-            shutil.copytree(common_path, common_target_path, dirs_exist_ok=True)
+        if self.product == 'flasharray':
+            if first_version:
+                print("Extracting common classes")
+                # Copy out the common java files to a separate java project
+                common_path = os.path.join(working_dir, "common")
+                shutil.copytree(generator_output_dir, common_path, dirs_exist_ok=True)
+                shutil.rmtree(os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", self.product, self._get_version_for_package(version)))
+                tests_path = os.path.join(common_path, "src", "test")
+                if os.path.isdir(tests_path):
+                    shutil.rmtree(tests_path)
+                replace_text(os.path.join(common_path, 'pom.xml'), self._get_artifact_id(version), self.common_artifact_id)
+                replace_text(
+                    os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", self.product, "common", "JSON.java"),
+                    f"import {self._get_model_package(version)}.*;", "")
+                common_target_path = os.path.join(build_output_root_dir, "common")
+                os.makedirs(common_target_path)
+                shutil.copytree(common_path, common_target_path, dirs_exist_ok=True)
 
-            print("Common classes available at: " + common_target_path)
+                print("Common classes available at: " + common_target_path)
 
-        shutil.rmtree(os.path.join(generator_output_dir, "src", "main", "java", "com", "purestorage", "rest", "common"))
-        self._add_common_dependency_to_pom(os.path.join(generator_output_dir, 'pom.xml'), artifact_version)
+            shutil.rmtree(os.path.join(generator_output_dir, "src", "main", "java", "com", "purestorage", "rest", self.product, "common"))
+            self._add_common_dependency_to_pom(os.path.join(generator_output_dir, 'pom.xml'), artifact_version)
         print("Removing duplicate models")
         self._remove_duplicate_models((os.path.join(generator_output_dir, "src")))
 
 
-def get_language_handler(language: str) -> LaunguageHandlerBase:
+def get_language_handler(product: str, language: str) -> LaunguageHandlerBase:
     if language == 'java':
-        return JavaHandler()
+        return JavaHandler(product)
 
-    return LaunguageHandlerBase()
+    return LaunguageHandlerBase(product)

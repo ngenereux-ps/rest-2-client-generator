@@ -12,10 +12,21 @@
 
 import argparse
 from typing import List
+from scripts.file_utils import replace_text
 
 import yaml
+from yaml.resolver import Resolver
 import os
 import glob
+
+
+# Prevent the interpreter from thinking "on" is a boolean
+for ch in "OoYyNn":
+    if len(Resolver.yaml_implicit_resolvers[ch]) == 1:
+        del Resolver.yaml_implicit_resolvers[ch]
+    else:
+        Resolver.yaml_implicit_resolvers[ch] = [x for x in
+                                                Resolver.yaml_implicit_resolvers[ch] if x[0] != 'tag:yaml.org,2002:bool']
 
 
 def _process_refs(file):
@@ -181,6 +192,31 @@ def process_paths(paths: List):
         yaml_out = yaml.dump(yaml_obj)
         with open(file, "w") as f:
             f.write(yaml_out)
+
+    # Do any text replacing needed
+    for file in files:
+        # Handle properties with a truthy value for a name
+        replace_text(file, ' on:', ' "on":')
+
+
+def rename_array_yaml(paths: List):
+    full_paths = [os.path.join(os.getcwd(), path) for path in paths]
+    files = set()
+
+    for path in full_paths:
+        if os.path.isfile(path):
+            fileName, fileExt = os.path.splitext(path)
+            if fileExt == '.yaml':
+                files.add(path)
+        else:
+            full_paths += glob.glob(path + '/*')
+
+    # Do any text replacing needed
+    for file in files:
+        # Files named "array" cause problems with... arrays
+        replace_text(file, r'/array\.yaml', '/arrays.yaml')
+        if os.path.basename(file) == 'array.yaml':
+            os.rename(file, os.path.join(os.path.dirname(file), 'arrays.yaml'))
 
 
 def main():
