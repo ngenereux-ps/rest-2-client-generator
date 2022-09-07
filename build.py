@@ -39,7 +39,7 @@ def determine_versions(source_dir, product, versions):
             filename, extension = os.path.splitext(entry)
             if extension == '.yaml' and filename.endswith('.spec'):
                 filename = filename[:-len('.spec')]
-                if filename.startswith(prefix) and (filename[len(prefix)+2:] == 'X' or filename[len(prefix)+2:].isdigit()):
+                if filename.startswith(prefix) and (filename[len(prefix)+2:].isdigit()):
                     versions.append(filename[len(prefix):])
 
     return versions
