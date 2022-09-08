@@ -193,7 +193,7 @@ class JavaHandler(LaunguageHandlerBase):
         # Write configs
         for version in versions:
             config_dict = {
-                'groupId': "com.purestorage",
+                'groupId': "com.purestorage.rest",
                 'invokerPackage': f"com.purestorage.rest.{self.product}.common",
                 'modelPackage': self._get_model_package(version),
                 'apiPackage': self._get_api_package(version),
