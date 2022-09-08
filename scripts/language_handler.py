@@ -82,7 +82,7 @@ class JavaHandler(LaunguageHandlerBase):
             for index, line in enumerate(contents):
                 if '<dependencies>' in line:
                     contents.insert(index + 1, '        <dependency>\n')
-                    contents.insert(index + 2, '            <groupId>com.purestorage</groupId>\n')
+                    contents.insert(index + 2, '            <groupId>com.purestorage.rest</groupId>\n')
                     contents.insert(index + 3, f'            <artifactId>{self.common_artifact_id}</artifactId>\n')
                     contents.insert(index + 4, f'            <version>{artifact_version}</version>\n')
                     contents.insert(index + 5, '        </dependency>\n')
