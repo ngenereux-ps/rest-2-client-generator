@@ -117,7 +117,7 @@ class JavaHandler(LaunguageHandlerBase):
 
         return True
 
-    def _remove_duplicate_class(self, files, original, duplicate):
+    def _remove_duplicate_class(self, files, original, duplicate, replace_var_names=True):
         original_class_name = os.path.basename(original)
         duplicate_class_name = os.path.basename(duplicate)
 
@@ -133,7 +133,8 @@ class JavaHandler(LaunguageHandlerBase):
                 changed = False
                 for index, line in enumerate(contents):
                     line = re.sub(f"([^a-zA-z0-9])(?<!java\.util\.)({duplicate_class_name})([^a-zA-z0-9])", r"\1" + original_class_name + r"\3", line)
-                    line = re.sub(f"([^a-zA-z0-9])({duplicate_var_name})([^a-zA-z0-9])", r"\1" + original_var_name + r"\3", line)
+                    if replace_var_names:
+                        line = re.sub(f"([^a-zA-z0-9\"])({duplicate_var_name})([^a-zA-z0-9\"])", r"\1" + original_var_name + r"\3", line)
                     if line != contents[index]:
                         changed = True
 
@@ -181,7 +182,8 @@ class JavaHandler(LaunguageHandlerBase):
                 if self._check_duplicate_class(k, duplicate_name):
                     total_duplicate_classes += 1
                     os.remove(files[duplicate_name])
-                    total_updated_files += self._remove_duplicate_class(files, k, duplicate_name)
+                    # Don't replace variable names if we've found an "Arrays" class and an "Array" class
+                    total_updated_files += self._remove_duplicate_class(files, k, duplicate_name, False)
                     duplicates.add(duplicate_name)
 
 
