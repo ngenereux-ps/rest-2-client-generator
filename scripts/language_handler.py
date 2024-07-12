@@ -26,6 +26,9 @@ class LaunguageHandlerBase:
 
     def generate_configs(self, config_dir, language, versions, artifact_version):
         """Generate the config files used for this language for each version"""
+        for version in versions:
+            with open(get_config_file(config_dir, version), 'w') as config_file:
+                json.dump({}, config_file)
         pass
 
     def post_process(self, version, generator_output_dir, working_dir, build_output_root_dir, artifact_version,
@@ -250,7 +253,6 @@ class JavaHandler(LaunguageHandlerBase):
             self._add_common_dependency_to_pom(os.path.join(generator_output_dir, 'pom.xml'), artifact_version)
         print("Removing duplicate models")
         self._remove_duplicate_models((os.path.join(generator_output_dir, "src")))
-
 
 def get_language_handler(product: str, language: str) -> LaunguageHandlerBase:
     if language == 'java':
