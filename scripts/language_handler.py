@@ -257,13 +257,18 @@ class JavaHandler(LaunguageHandlerBase):
                     return_body = file_contents[return_body_start : return_body_end]
                     replaced_return_body_str = return_body.replace(match.group(1), new_return)
 
-                    # introduce new function
-                    clear_fn = '\n\n  public void clear' + variable.title() + '() {\n    this.' + variable + '= "";\n  }'
+                    func_title = variable[0].upper() + variable[1:]
 
-                    file_contents = file_contents[:member_line_start] + replaced_member_type_str + file_contents[member_line_end:return_body_start] + replaced_return_body_str + clear_fn + file_contents[return_body_end:]
+                    # introduce new function
+                    clear_fn = '\n\n  public void clear' + func_title + '() {\n    this.' + variable + '= "";\n  }'
+
+                    raw_set_fn = '\n\n  public void set' + func_title + 'Raw(Object value) {\n    this.' + variable + '= value;\n  }'
+
+                    raw_set_inline_fn = '\n\n  public ' + file_name + ' ' + variable + 'Raw(Object value) {\n    this.' + variable + '= value;\n    return this;\n  }'
+
+                    file_contents = file_contents[:member_line_start] + replaced_member_type_str + file_contents[member_line_end:return_body_start] + replaced_return_body_str + clear_fn + raw_set_fn + raw_set_inline_fn + file_contents[return_body_end:]
 
             with open(file_path, 'w') as file:
-                print(f"_modifyShadowNullableVariables: replacing file contents {file_name}")
                 file.write(file_contents)
 
 
@@ -311,6 +316,7 @@ class JavaHandler(LaunguageHandlerBase):
             self._add_common_dependency_to_pom(os.path.join(generator_output_dir, 'pom.xml'), artifact_version)
         print("Removing duplicate models")
         self._remove_duplicate_models((os.path.join(generator_output_dir, "src")))
+        print("Adding Shadow Nullable Variables")
         self._modify_shadow_nullable_variables((os.path.join(generator_output_dir, "src")), shadow_nullable_varibles)
 
 def get_language_handler(product: str, language: str) -> LaunguageHandlerBase:
