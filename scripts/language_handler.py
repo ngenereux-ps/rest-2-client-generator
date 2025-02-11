@@ -298,14 +298,34 @@ class JavaHandler(LaunguageHandlerBase):
                 # Copy out the common java files to a separate java project
                 common_path = os.path.join(working_dir, "common")
                 shutil.copytree(generator_output_dir, common_path, dirs_exist_ok=True)
+                # Remove non-common files from new common project
                 shutil.rmtree(os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", self.product, self._get_version_for_package(version)))
+                # Remove test files from new common project
                 tests_path = os.path.join(common_path, "src", "test")
                 if os.path.isdir(tests_path):
                     shutil.rmtree(tests_path)
+                # Update the pom with the common artifact id
                 replace_text(os.path.join(common_path, 'pom.xml'), self._get_artifact_id(version), self.common_artifact_id)
-                replace_text(
-                    os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", self.product, "common", "JSON.java"),
-                    f"import {self._get_model_package(version)}.*;", "")
+
+                # remove unnecessary version-specific content from JSON.java
+                json_file = os.path.join(common_path, "src", "main", "java", "com", "purestorage", "rest", self.product, "common", "JSON.java")
+                # Remove imports
+                replace_text(json_file, f"import {self._get_model_package(version)}.*;", "")
+                # Replace `createGson()` function with bare minimum
+                with open(json_file, "r") as file:
+                    lines = file.readlines()
+                with open(json_file, "w") as file:
+                    write_lines = True
+                    for line in lines:
+                        if not write_lines and "GsonBuilder builder = fireBuilder.createGsonBuilder();" in line:
+                            # We've reached the end of the createGson function. Insert the simple version and continue
+                            file.write("        GsonFireBuilder fireBuilder = new GsonFireBuilder();\n")
+                            write_lines = True
+                        if write_lines:
+                            file.write(line)
+                        if "public static GsonBuilder createGson()" in line:
+                            # We've reached the start of the createGson function. Stop copying until we reach the end
+                            write_lines = False
                 common_target_path = os.path.join(build_output_root_dir, "common")
                 os.makedirs(common_target_path)
                 shutil.copytree(common_path, common_target_path, dirs_exist_ok=True)
